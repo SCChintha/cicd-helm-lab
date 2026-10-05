@@ -69,3 +69,42 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+  deploy:
+    needs: build
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: lab
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install demo chart \
+            --set image.repository=${{ needs.build.outputs.image }} \
+            --set image.tag=${{ needs.build.outputs.tag }} \
+            --atomic --wait --timeout 120s
+
+      - name: Smoke test
+        run: |
+          kubectl rollout status deployment/demo --timeout=60s
+
+          kubectl port-forward svc/demo 8080:80 &
+
+          sleep 5
+
+          curl -fsS localhost:8080/healthz
+
+          curl -fsS localhost:8080/ | grep "${{ needs.build.outputs.tag }}"
+
+      - name: Show release
+        if: always()
+        run: |
+          helm list
+          kubectl get pods -o wide
